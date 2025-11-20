@@ -286,9 +286,13 @@ def create_calendar_event(service, meeting: dict, start_time: dt.datetime, end_t
                 attendees.append({"email": att["email"]})
         
         # Create event body
+        topic = meeting.get("topic") or ""
+        extra_context = meeting.get("extra_context") or ""
+        description = (topic + ("\n\n" + extra_context if extra_context else "")).strip()
+        
         event = {
             "summary": meeting.get("subject", "Meeting"),
-            "description": meeting.get("topic", "") + "\n\n" + meeting.get("extra_context", ""),
+            "description": description,
             "start": {
                 "dateTime": start_time.isoformat(),
                 "timeZone": meeting.get("time_zone", DEFAULT_TIME_ZONE),
@@ -319,6 +323,108 @@ def create_calendar_event(service, meeting: dict, start_time: dt.datetime, end_t
         return None
 
 
+def search_events(service, criteria: dict, time_range_start: dt.datetime, time_range_end: dt.datetime) -> list[dict]:
+    """
+    Search for calendar events matching the given criteria.
+    
+    Args:
+        service: Google Calendar API service object
+        criteria: Dict with search parameters (attendee_name, subject_keywords, etc.)
+        time_range_start: Start of time range to search
+        time_range_end: End of time range to search
+    
+    Returns:
+        List of matching events with details
+    """
+    if not service:
+        return []
+    
+    try:
+        # Query calendar events in the time range
+        events_result = service.events().list(
+            calendarId=CALENDAR_ID,
+            timeMin=time_range_start.isoformat() + 'Z',
+            timeMax=time_range_end.isoformat() + 'Z',
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        
+        # Filter by criteria
+        matching_events = []
+        attendee_name = (criteria.get("attendee_name") or "").lower()
+        subject_keywords = criteria.get("subject_keywords") or []
+        
+        for event in events:
+            # Skip if no attendees (solo events)
+            if not event.get('attendees'):
+                continue
+            
+            # Check attendee name match
+            attendee_match = False
+            if attendee_name:
+                for attendee in event.get('attendees', []):
+                    attendee_email = attendee.get('email', '').lower()
+                    attendee_display = attendee.get('displayName', '').lower()
+                    if attendee_name in attendee_email or attendee_name in attendee_display:
+                        attendee_match = True
+                        break
+            else:
+                attendee_match = True  # No attendee filter
+            
+            # Check subject keywords match
+            subject_match = True
+            if subject_keywords:
+                summary = event.get('summary', '').lower()
+                subject_match = any(keyword.lower() in summary for keyword in subject_keywords)
+            
+            if attendee_match and subject_match:
+                matching_events.append({
+                    'id': event['id'],
+                    'summary': event.get('summary', 'No title'),
+                    'start': event['start'].get('dateTime', event['start'].get('date')),
+                    'end': event['end'].get('dateTime', event['end'].get('date')),
+                    'attendees': event.get('attendees', []),
+                    'raw_event': event
+                })
+        
+        return matching_events
+        
+    except HttpError as e:
+        print(f"   ⚠ Failed to search events: {e}")
+        return []
+    except Exception as e:
+        print(f"   ⚠ Unexpected error searching events: {e}")
+        return []
+
+
+def delete_calendar_event(service, event_id: str) -> bool:
+    """
+    Delete a calendar event by ID.
+    
+    Args:
+        service: Google Calendar API service object
+        event_id: ID of the event to delete
+    
+    Returns:
+        True if deleted successfully, False otherwise
+    """
+    if not service:
+        return False
+    
+    try:
+        service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
+        return True
+    except HttpError as e:
+        print(f"   ⚠ Failed to delete event: {e}")
+        return False
+    except Exception as e:
+        print(f"   ⚠ Unexpected error deleting event: {e}")
+        return False
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -344,12 +450,18 @@ JSON schema (all keys required):
   ],
   "duration_minutes": 30,
   "time_zone": "IANA time zone, e.g. 'America/New_York'",
-  "scheduling_mode": "direct" or "proposal",
+  "scheduling_mode": "direct" or "proposal" or "cancel",
   "exact_time": "ISO 8601 datetime if mode=direct, e.g. '2025-11-24T14:00', else null",
   "earliest_start": "ISO 8601 datetime for the earliest acceptable start, e.g. '2025-11-24T09:00'",
   "latest_end": "ISO 8601 datetime for the latest acceptable end, e.g. '2025-11-28T17:00'",
   "preferred_times_of_day": ["morning", "afternoon", "evening"],
-  "extra_context": "Any additional information that should be included in the email body."
+  "extra_context": "Any additional information that should be included in the email body.",
+  "cancel_criteria": {{
+    "attendee_name": "Name of person if canceling meeting with them, else null",
+    "date_range_start": "ISO 8601 datetime for start of search range if canceling, else null",
+    "date_range_end": "ISO 8601 datetime for end of search range if canceling, else null",
+    "subject_keywords": ["List of keywords to match in subject if canceling, else empty list"]
+  }}
 }}
 
 Rules:
@@ -364,10 +476,13 @@ Rules:
 - If no attendees are mentioned, attendees list can be empty (but still present).
 
 SCHEDULING MODE DETECTION (CRITICAL):
-- Set scheduling_mode to "direct" if the user specifies an EXACT date and time 
+- Set scheduling_mode to "cancel" if the user wants to DELETE/CANCEL/REMOVE an existing meeting
+  (e.g., "Cancel my meeting with Alice", "Delete tomorrow's 2pm meeting", "Remove the sync with Bob").
+  In this case, fill cancel_criteria with search parameters.
+- Set scheduling_mode to "direct" if the user specifies an EXACT date and time for SCHEDULING
   (e.g., "tomorrow at 2pm", "Monday November 25 at 3:00pm", "next Friday 10am").
   In this case, set exact_time to that specific datetime.
-- Set scheduling_mode to "proposal" if the user gives a TIME RANGE or vague window
+- Set scheduling_mode to "proposal" if the user gives a TIME RANGE or vague window for SCHEDULING
   (e.g., "next week", "tomorrow afternoon", "sometime next Monday", "between 2-4pm").
   In this case, set exact_time to null.
 
@@ -521,6 +636,7 @@ Requirements for the email:
 - Clearly state that times are in {time_zone}.
 - Ask them to choose one option or propose an alternative.
 - Keep it professional but warm.
+- Sign off with: "Best regards, {sender_name}"
 - Do NOT include any JSON or technical formatting, just plain email text.
 """
 
@@ -554,6 +670,14 @@ def draft_email(meeting: dict, slots: list[dict]) -> str:
     """
     slot_lines = format_slots_for_prompt(slots, meeting["time_zone"])
     attendee_lines = format_attendees_for_prompt(meeting.get("attendees", []))
+    
+    # Get first attendee name for greeting
+    recipient_name = "there"
+    attendees = meeting.get("attendees", [])
+    if attendees and attendees[0].get("name"):
+        # Use first name only
+        full_name = attendees[0]["name"]
+        recipient_name = full_name.split()[0] if full_name else "there"
 
     prompt = EMAIL_PROMPT_TEMPLATE.format(
         subject=meeting["subject"],
@@ -563,6 +687,8 @@ def draft_email(meeting: dict, slots: list[dict]) -> str:
         slot_lines=slot_lines,
         attendee_lines=attendee_lines,
         extra_context=meeting.get("extra_context", ""),
+        recipient_name=recipient_name,
+        sender_name=FROM_NAME,
     )
 
     response = client.models.generate_content(
@@ -596,14 +722,14 @@ Extra context from the user:
 \"\"\"{extra_context}\"\"\"
 
 Requirements for the email:
-- Write as if from a human (me), not from an AI.
-- Start with a friendly greeting.
+- Address the recipient by their first name in the greeting (e.g., "Hi {recipient_name},").
 - CONFIRM that the meeting has been scheduled (don't ask for availability).
 - Clearly state the date, time, and duration.
 - Include the calendar event link so they can add it to their calendar.
 - Mention the topic/purpose briefly.
 - Let them know they can reach out if they need to reschedule.
 - Keep it professional but warm.
+- Sign off with: "Best regards, {sender_name}"
 - Do NOT include any JSON or technical formatting, just plain email text.
 """
 
@@ -621,6 +747,13 @@ def draft_confirmation_email(meeting: dict, event_details: dict, start_time: dt.
     
     event_link = event_details.get("link", "N/A") if event_details else "N/A"
     
+    # Get first attendee name for greeting
+    recipient_name = "there"
+    attendees = meeting.get("attendees", [])
+    if attendees and attendees[0].get("name"):
+        full_name = attendees[0]["name"]
+        recipient_name = full_name.split()[0] if full_name else "there"
+    
     prompt = CONFIRMATION_EMAIL_TEMPLATE.format(
         subject=meeting["subject"],
         topic=meeting["topic"],
@@ -630,6 +763,103 @@ def draft_confirmation_email(meeting: dict, event_details: dict, start_time: dt.
         event_link=event_link,
         attendee_lines=attendee_lines,
         extra_context=meeting.get("extra_context", ""),
+        recipient_name=recipient_name,
+        sender_name=FROM_NAME,
+    )
+    
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+    return response.text.strip()
+
+
+
+# ---------------------------------------------------------------------------
+# 5c. Cancellation email for cancel mode
+# ---------------------------------------------------------------------------
+
+CANCELLATION_EMAIL_TEMPLATE = """
+You are an AI meeting scheduling assistant.
+
+Write a polite, concise CANCELLATION email for a meeting that needs to be cancelled.
+
+Meeting details being cancelled:
+- Subject: {subject}
+- Date and time: {date_time_str}
+- Duration: {duration_minutes} minutes
+
+Attendees:
+{attendee_lines}
+
+Requirements for the email:
+- Address the recipient by their first name in the greeting (e.g., "Hi {recipient_name},").
+- CLEARLY state that the meeting is CANCELLED.
+- Include the meeting details (date, time, subject) so they know which one.
+- Apologize for any inconvenience.
+- Offer to reschedule if appropriate.
+- Keep it professional but warm.
+- Sign off with: "Best regards, {sender_name}"
+- Do NOT include any JSON or technical formatting, just plain email text.
+"""
+
+
+def draft_cancellation_email(event: dict) -> str:
+    """
+    Ask Gemini to draft a cancellation email for a deleted meeting.
+    """
+    # Extract event details
+    summary = event.get('summary', 'Meeting')
+    start_str = event.get('start', '')
+    end_str = event.get('end', '')
+    
+    # Parse start/end times
+    try:
+        if 'T' in start_str:
+            start_time = dt.datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+            end_time = dt.datetime.fromisoformat(end_str.replace('Z', '+00:00'))
+            start_time = start_time.replace(tzinfo=None)
+            end_time = end_time.replace(tzinfo=None)
+            
+            date_str = start_time.strftime("%A, %B %d, %Y")
+            time_str = f"{start_time.strftime('%I:%M %p')}–{end_time.strftime('%I:%M %p')}"
+            date_time_str = f"{date_str} at {time_str}"
+            duration_minutes = int((end_time - start_time).total_seconds() / 60)
+        else:
+            # All-day event
+            date_time_str = start_str
+            duration_minutes = "all-day"
+    except:
+        date_time_str = f"{start_str}"
+        duration_minutes = "unknown"
+    
+    # Format attendees
+    attendees = event.get('attendees', [])
+    if attendees:
+        attendee_lines = "\n".join([
+            f"- {att.get('displayName', att.get('email', 'Unknown'))}"
+            for att in attendees
+        ])
+    else:
+        attendee_lines = "- (No other attendees)"
+    
+    # Get first attendee name for greeting
+    recipient_name = "there"
+    if attendees and attendees[0]:
+        display_name = attendees[0].get('displayName', '')
+        if display_name:
+            recipient_name = display_name.split()[0]
+        else:
+            email = attendees[0].get('email', '')
+            recipient_name = email.split('@')[0] if '@' in email else "there"
+    
+    prompt = CANCELLATION_EMAIL_TEMPLATE.format(
+        subject=summary,
+        date_time_str=date_time_str,
+        duration_minutes=duration_minutes,
+        attendee_lines=attendee_lines,
+        recipient_name=recipient_name,
+        sender_name=FROM_NAME,
     )
     
     response = client.models.generate_content(
@@ -706,9 +936,139 @@ def run_scheduler_agent(user_instruction: str, auto_send: bool = True) -> None:
     scheduling_mode = meeting.get("scheduling_mode", "proposal")
     print(f"\n>> Scheduling mode: {scheduling_mode.upper()}")
     
-    # Collect recipient emails from attendees
+    # === CANCEL MODE ===
+    if scheduling_mode == "cancel":
+        cancel_criteria = meeting.get("cancel_criteria", {})
+        
+        if not calendar_service:
+            print("\n[ERROR] Cannot cancel event: Calendar service unavailable.")
+            print("To use event cancellation, you must set up Google Calendar credentials.")
+            return
+        
+        # Determine search time range
+        date_range_start_str = cancel_criteria.get("date_range_start")
+        date_range_end_str = cancel_criteria.get("date_range_end")
+        
+        if date_range_start_str and date_range_end_str:
+            time_range_start = dt.datetime.fromisoformat(date_range_start_str)
+            time_range_end = dt.datetime.fromisoformat(date_range_end_str)
+        else:
+            # Default: search next 30 days
+            time_range_start = dt.datetime.now()
+            time_range_end = dt.datetime.now() + dt.timedelta(days=30)
+        
+        print(f"\n>> Searching for events to cancel...")
+        print(f"   Search range: {time_range_start.strftime('%Y-%m-%d')} to {time_range_end.strftime('%Y-%m-%d')}")
+        
+        matching_events = search_events(calendar_service, cancel_criteria, time_range_start, time_range_end)
+        
+        if not matching_events:
+            print("\n[INFO] No matching events found.")
+            print("Try being more specific, e.g., mention attendee name or exact date/time.")
+            return
+        
+        print(f"\n✓ Found {len(matching_events)} matching event(s):\n")
+        
+        # Display matching events
+        for idx, event in enumerate(matching_events, 1):
+            start_str = event['start']
+            try:
+                if 'T' in start_str:
+                    start_time = dt.datetime.fromisoformat(start_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                    date_time_display = start_time.strftime('%A, %B %d at %I:%M %p')
+                else:
+                    date_time_display = start_str
+            except:
+                date_time_display = start_str
+            
+            attendee_names = ", ".join([a.get('displayName', a.get('email', 'Unknown')) for a in event['attendees'][:3]])
+            if len(event['attendees']) > 3:
+                attendee_names += f" +{len(event['attendees']) - 3} more"
+            
+            print(f"  [{idx}] {event['summary']}")
+            print(f"      {date_time_display}")
+            print(f"      Attendees: {attendee_names}\n")
+        
+        # If multiple matches, ask user to select
+        selected_event = None
+        if len(matching_events) == 1:
+            selected_event = matching_events[0]
+            print(">> This is the only matching event.\n")
+        else:
+            while True:
+                try:
+                    selection = input(f"Which event would you like to cancel? [1-{len(matching_events)}] or 'q' to quit: ").strip()
+                    if selection.lower() == 'q':
+                        print("Cancelled. No events were deleted.")
+                        return
+                    idx = int(selection)
+                    if 1 <= idx <= len(matching_events):
+                        selected_event = matching_events[idx - 1]
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(matching_events)}.")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+        
+        # Confirm deletion
+        print("\n" + "=" * 60)
+        print("EVENT TO BE CANCELLED:")
+        print("=" * 60)
+        print(f"Subject: {selected_event['summary']}")
+        try:
+            start_time = dt.datetime.fromisoformat(selected_event['start'].replace('Z', '+00:00')).replace(tzinfo=None)
+            print(f"When: {start_time.strftime('%A, %B %d, %Y at %I:%M %p')}")
+        except:
+            print(f"When: {selected_event['start']}")
+        print(f"Attendees: {len(selected_event['attendees'])} people")
+        print("=" * 60)
+        
+        if not auto_send:
+            confirm = input("\n⚠️  Are you sure you want to DELETE this event? [y/N]: ").strip().lower()
+            if confirm != 'y':
+                print("Cancelled. Event was not deleted.")
+                return
+        
+        # Delete the event
+        print("\n>> Deleting calendar event...")
+        success = delete_calendar_event(calendar_service, selected_event['id'])
+        
+        if not success:
+            print("\n[ERROR] Failed to delete event. See error above.")
+            return
+        
+        print("   ✓ Event deleted from calendar")
+        
+        # Draft cancellation email
+        print("\n>> Drafting cancellation email with Gemini...")
+        email_body = draft_cancellation_email(selected_event)
+        print("\nGenerated cancellation email:\n")
+        print("=" * 60)
+        print(email_body)
+        print("=" * 60)
+        
+        # Get recipient emails from the event
+        recipients = [att['email'] for att in selected_event['attendees'] if att.get('email')]
+        
+        if not recipients:
+            print("\n[INFO] No attendees with email addresses. No notification sent.")
+            print("Event has been deleted from your calendar.")
+            return
+        
+        if not auto_send:
+            answer = input("\nSend this cancellation email to attendees? [y/N]: ").strip().lower()
+            if answer != 'y':
+                print("Email not sent. Event has been deleted from your calendar.")
+                return
+        
+        print("\n>> Sending cancellation email via SMTP...")
+        send_email_smtp(recipients, f"Cancelled: {selected_event['summary']}", email_body)
+        print("Done. Cancellation email sent!")
+        return
+    
+    # Collect recipient emails from attendees (for direct/proposal modes)
     recipients = [a["email"] for a in meeting.get("attendees", []) if a.get("email")]
-    if not recipients:
+    if not recipients and scheduling_mode != "cancel":
         print("\n[WARNING] No attendee emails parsed. "
               "You must hardcode or manually provide recipients.")
         return
@@ -720,18 +1080,32 @@ def run_scheduler_agent(user_instruction: str, auto_send: bool = True) -> None:
             print("\n[ERROR] Direct mode selected but no exact_time provided. Falling back to proposal mode.")
             scheduling_mode = "proposal"
         else:
-            # Create calendar event
+            # Prepare event details
             start_time = dt.datetime.fromisoformat(exact_time_str)
             duration_minutes = int(meeting.get("duration_minutes", 30))
             end_time = start_time + dt.timedelta(minutes=duration_minutes)
-            
-            print(f"\n>> Creating calendar event for {start_time.strftime('%A, %B %d at %I:%M %p')}...")
             
             if not calendar_service:
                 print("\n[ERROR] Cannot create calendar event: Calendar service unavailable.")
                 print("To use direct scheduling, you must set up Google Calendar credentials.")
                 return
             
+            # Show what will be created
+            print(f"\n>> Will create calendar event:")
+            print(f"   Subject: {meeting['subject']}")
+            print(f"   When: {start_time.strftime('%A, %B %d at %I:%M %p')}")
+            print(f"   Duration: {duration_minutes} minutes")
+            print(f"   Attendees: {', '.join([a.get('name', a.get('email', 'Unknown')) for a in meeting.get('attendees', [])])}")
+            
+            # Ask for confirmation BEFORE creating event
+            if not auto_send:
+                confirm = input("\n>> Proceed with creating this event and sending confirmation? [y/N]: ").strip().lower()
+                if confirm != 'y':
+                    print("Aborted. No event was created.")
+                    return
+            
+            # NOW create the calendar event
+            print(f"\n>> Creating calendar event...")
             event_details = create_calendar_event(calendar_service, meeting, start_time, end_time)
             
             if not event_details:
@@ -749,12 +1123,7 @@ def run_scheduler_agent(user_instruction: str, auto_send: bool = True) -> None:
             print(email_body)
             print("=" * 60)
             
-            if not auto_send:
-                answer = input("\nSend this confirmation email? [y/N]: ").strip().lower()
-                if answer != "y":
-                    print("Aborted. Email was not sent (but calendar event was created).")
-                    return
-            
+            # Send email (event already created, so just send)
             print("\n>> Sending confirmation email via SMTP...")
             send_email_smtp(recipients, meeting["subject"], email_body)
             print("Done. Confirmation email sent!")
