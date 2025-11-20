@@ -1,0 +1,24 @@
+# Environment and secrets
+.env
+token.json
+credentials.json
+
+# Contact memory
+contacts.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
