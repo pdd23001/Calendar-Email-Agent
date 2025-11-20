@@ -1,4 +1,4 @@
-# AI Meeting Scheduler Agent
+# Meeting Scheduler Agent
 
 An intelligent meeting scheduling assistant powered by Google Gemini AI that:
 - **Parses natural language** scheduling requests
