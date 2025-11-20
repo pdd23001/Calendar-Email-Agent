@@ -46,27 +46,80 @@ Contacts are stored in `contacts.json` for persistence.
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment Variables
+### 2. Create and Configure .env File
 
-Edit `.env` and fill in the following required fields:
+The `.env` file stores all your API keys and configuration. Create it in the project directory:
 
 ```bash
-# Get from https://aistudio.google.com/
-GEMINI_API_KEY=your_actual_gemini_api_key_here
-
-# Gmail App Password (NOT your regular password)
-# Generate from Google Account > Security > App passwords
-SMTP_PASSWORD=your_gmail_app_password_here
+cd "Your Project Directory"
+touch .env (or you can create it manually)
 ```
 
-Optional: Adjust these if needed:
+Then open `.env` in your text editor and add the following:
+
+#### Required Variables
+
 ```bash
-SMTP_USERNAME=your-email@gmail.com
-FROM_EMAIL=your-email@gmail.com
+# === Gemini AI API Key ===
+# Get your API key from: https://aistudio.google.com/
+# Click "Get API key" → Create API key → Copy it here
+GEMINI_API_KEY=your_actual_gemini_api_key_here
+
+# === Gmail SMTP Configuration ===
+# Your Gmail address (the account sending emails)
+SMTP_USERNAME=your.email@gmail.com
+
+# Gmail App Password (NOT your regular Gmail password!)
+# How to generate:
+# 1. Go to https://myaccount.google.com/security
+# 2. Enable 2-Step Verification (if not already enabled)
+# 3. Go to App passwords: https://myaccount.google.com/apppasswords
+# 4. Select app: Mail
+# 5. Select device: Other (Custom name) → "Meeting Scheduler"
+# 6. Click Generate → Copy the 16-character password
+SMTP_PASSWORD=your_16_character_app_password_here
+```
+
+#### Optional Variables (Already Have Defaults)
+
+```bash
+# === SMTP Server Settings ===
+# Only change if not using Gmail
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+
+# === Email Sender Identity ===
+# What recipients will see as the sender
+FROM_EMAIL=your.email@gmail.com
 FROM_NAME=Your Name
+
+# === Time Zone ===
+# Default timezone for scheduling
+# See: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 DEFAULT_TIME_ZONE=America/New_York
+
+# === Google Calendar Settings ===
+# Which calendar to use (usually leave as "primary")
 CALENDAR_ID=primary
+
+# === Contact Storage ===
+# Where to save contact email addresses
 CONTACTS_FILE=./contacts.json
+```
+
+**Important Notes:**
+- ⚠️ **Never commit `.env` to Git** - it's already in `.gitignore`
+- 🔑 **Use App Password, not Gmail password** - regular password won't work
+- ✅ **No quotes needed** - values are used as-is after the `=` sign
+
+**Example Complete .env File:**
+```bash
+GEMINI_API_KEY=AIzaSyD-9tIGbxQzXcVmR1Ko8sN3jW4pLmH7kF0
+SMTP_USERNAME=john.doe@gmail.com
+SMTP_PASSWORD=abcd efgh ijkl mnop
+FROM_EMAIL=john.doe@gmail.com
+FROM_NAME=John Doe
+DEFAULT_TIME_ZONE=America/New_York
 ```
 
 ### 3. Set Up Google Calendar (Optional but Recommended)
@@ -393,9 +446,9 @@ graph TD
 
 ## Future Enhancements
 
-- [ ] Multi-timezone support
-- [ ] Integration with other calendar providers
-- [ ] Web interface
-- [ ] Conflict resolution when all slots are busy
+- Multi-timezone support
+- Integration with other calendar providers
+- Web interface
+- Conflict resolution when all slots are busy
 
 ---
