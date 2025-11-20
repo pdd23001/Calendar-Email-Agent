@@ -357,21 +357,33 @@ def search_events(service, criteria: dict, time_range_start: dt.datetime, time_r
         subject_keywords = criteria.get("subject_keywords") or []
         
         for event in events:
-            # Skip if no attendees (solo events)
-            if not event.get('attendees'):
-                continue
-            
-            # Check attendee name match
+            # Check attendee name match (only if attendee_name is specified)
             attendee_match = False
             if attendee_name:
+                # Check actual attendees list
                 for attendee in event.get('attendees', []):
                     attendee_email = attendee.get('email', '').lower()
                     attendee_display = attendee.get('displayName', '').lower()
                     if attendee_name in attendee_email or attendee_name in attendee_display:
                         attendee_match = True
                         break
+                
+                # Also check event summary/title for the name
+                if not attendee_match:
+                    summary = event.get('summary', '').lower()
+                    if attendee_name in summary:
+                        attendee_match = True
+                
+                # Also check organizer
+                if not attendee_match:
+                    organizer = event.get('organizer', {})
+                    organizer_email = organizer.get('email', '').lower()
+                    organizer_display = organizer.get('displayName', '').lower()
+                    if attendee_name in organizer_email or attendee_name in organizer_display:
+                        attendee_match = True
             else:
-                attendee_match = True  # No attendee filter
+                # No attendee filter - match all events
+                attendee_match = True
             
             # Check subject keywords match
             subject_match = True
