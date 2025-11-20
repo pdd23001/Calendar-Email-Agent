@@ -641,13 +641,15 @@ Extra context from the user:
 
 
 Requirements for the email:
-- Write as if from a human (me), not from an AI.
-- Start with a friendly greeting.
-- Briefly mention the purpose of the meeting.
+- IMPORTANT: Do NOT include "Subject:" or any email headers in the body text.
+- The email body should start directly with the greeting.
+- Address the recipient by their first name in the greeting (e.g., "Hi {recipient_name},").
+- Get straight to the point - mention you're reaching out to schedule a meeting.
+- Briefly mention the purpose/topic if provided.
 - Present the candidate time slots as a bulleted list.
 - Clearly state that times are in {time_zone}.
 - Ask them to choose one option or propose an alternative.
-- Keep it professional but warm.
+- Keep it professional but warm and conversational.
 - Sign off with: "Best regards, {sender_name}"
 - Do NOT include any JSON or technical formatting, just plain email text.
 """
@@ -734,13 +736,15 @@ Extra context from the user:
 \"\"\"{extra_context}\"\"\"
 
 Requirements for the email:
+- IMPORTANT: Do NOT include "Subject:" or any email headers in the body text.
+- The email body should start directly with the greeting.
 - Address the recipient by their first name in the greeting (e.g., "Hi {recipient_name},").
-- CONFIRM that the meeting has been scheduled (don't ask for availability).
-- Clearly state the date, time, and duration.
-- Include the calendar event link so they can add it to their calendar.
-- Mention the topic/purpose briefly.
+- Get straight to the point - CONFIRM the meeting is scheduled.
+- State the date, time, and duration naturally (don't list them as bullet points).
+- Include the calendar event link in a natural way.
+- Briefly mention the topic/purpose if it's substantive (skip if generic like "discussion").
 - Let them know they can reach out if they need to reschedule.
-- Keep it professional but warm.
+- Keep it professional but warm and conversational.
 - Sign off with: "Best regards, {sender_name}"
 - Do NOT include any JSON or technical formatting, just plain email text.
 """
@@ -805,12 +809,14 @@ Attendees:
 {attendee_lines}
 
 Requirements for the email:
+- IMPORTANT: Do NOT include "Subject:" or any email headers in the body text.
+- The email body should start directly with the greeting.
 - Address the recipient by their first name in the greeting (e.g., "Hi {recipient_name},").
-- CLEARLY state that the meeting is CANCELLED.
-- Include the meeting details (date, time, subject) so they know which one.
+- Get straight to the point - CLEARLY state the specific meeting is CANCELLED.
+- State which meeting (date, time) in a natural, conversational way.
 - Apologize for any inconvenience.
 - Offer to reschedule if appropriate.
-- Keep it professional but warm.
+- Keep it professional but warm and conversational.
 - Sign off with: "Best regards, {sender_name}"
 - Do NOT include any JSON or technical formatting, just plain email text.
 """
